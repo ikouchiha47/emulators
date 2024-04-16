@@ -33,13 +33,61 @@ const LoadRomError = error{
     OutOfMemory,
 };
 
+// The first 4 bits are used.
+const Sprites = [16][5]u8{
+    [5]u8{ 0xF0, 0x90, 0x90, 0x90, 0xF0 }, // 0
+    [5]u8{ 0x20, 0x60, 0x20, 0x20, 0x70 }, // 1
+    [5]u8{ 0xF0, 0x10, 0xF0, 0x80, 0xF0 }, // 2
+    [5]u8{ 0xF0, 0x10, 0xF0, 0x10, 0xF0 }, // 3
+    [5]u8{ 0x90, 0x90, 0xF0, 0x10, 0x10 }, // 4
+    [5]u8{ 0xF0, 0x80, 0xF0, 0x10, 0xF0 }, // 5
+    [5]u8{ 0xF0, 0x80, 0xF0, 0x90, 0xF0 }, // 6
+    [5]u8{ 0xF0, 0x10, 0x20, 0x40, 0x40 }, // 7
+    [5]u8{ 0xF0, 0x90, 0xF0, 0x90, 0xF0 }, // 8
+    [5]u8{ 0xF0, 0x90, 0xF0, 0x10, 0x10 }, // 9
+    [5]u8{ 0xF0, 0x90, 0xF0, 0x90, 0x90 }, // A
+    [5]u8{ 0xE0, 0x90, 0xE0, 0x90, 0xE0 }, // B
+    [5]u8{ 0xF0, 0x80, 0xF0, 0x80, 0xF0 }, // C
+    [5]u8{ 0xE0, 0x90, 0x90, 0x90, 0xE0 }, // D
+    [5]u8{ 0xF0, 0x80, 0xF0, 0x80, 0xF0 }, // E
+    [5]u8{ 0xF0, 0x80, 0xF0, 0x80, 0x80 }, // F
+};
+
+const Cpu = struct {
+    // var pc: u8 = 0x200;
+    // var v: [16]u8 = std.mem.zeroes([16]u8);
+    pc: u16,
+    v: [16]u8,
+
+    pub fn init() Cpu {
+        return Cpu{ .pc = 0x200, .v = std.mem.zeroes([16]u8) };
+    }
+
+    // Works on a fetch decode execute cycle
+    // In case of Chip8 we only need decode and execute
+    // Fetch also can be inside this, since its quite simple
+    pub fn execute(self: *Cpu, memory: [0x1000]u8) void {
+        const lo: u8 = memory[self.pc];
+        const hi: u8 = memory[self.pc + 1];
+
+        var instruction: u16 = 0;
+        instruction = ((instruction | lo) << 8) | hi;
+
+        std.log.info("read {x} {x} {x}", .{ instruction, lo, hi });
+        self.pc = self.pc + 2;
+
+        return;
+    }
+};
+
 const Chip8 = struct {
     ram: Memory,
+    cpu: Cpu,
 
     pub fn init() Chip8 {
         const ram = Memory{
             .memory = [_]u8{0} ** 0x1000,
-            .v = undefined,
+            .v = std.mem.zeroes([16]u8),
             .ir = 0,
             .pc = 0x200,
             .stack = undefined,
@@ -48,7 +96,10 @@ const Chip8 = struct {
             .sound_timer = 0,
             .keys = undefined,
         };
-        return Chip8{ .ram = ram };
+
+        const cpu = Cpu.init();
+
+        return Chip8{ .ram = ram, .cpu = cpu };
     }
 
     pub fn load_game(self: *Chip8, gameData: []u8) !void {
@@ -63,8 +114,30 @@ const Chip8 = struct {
             self.ram.memory[offset + index] = byte;
         }
 
-        std.log.info("memory {any}", .{self.ram.memory});
-        std.log.info("gameData {any}", .{gameData});
+        var i: usize = 0;
+
+        for (Sprites) |sprite| {
+            for (sprite) |val| {
+                self.ram.memory[i] = val;
+                i += 1;
+            }
+        }
+
+        // std.log.info("memory 0x{x}", .{self.ram.memory});
+        // _ = print_memory(self);
+
+        self.cpu.execute(self.ram.memory);
+        return;
+    }
+
+    pub fn print_memory(self: *Chip8) void {
+        for (self.ram.memory) |value| {
+            std.debug.print("0x{x:0<2} ", .{value});
+        }
+
+        std.debug.print("\n", .{});
+
+        std.log.info("gamedata bytearray {any}", .{self.ram.memory});
         return;
     }
 };
@@ -84,7 +157,7 @@ pub fn readFile(filename: []const u8, allocator: std.mem.Allocator) ![]u8 {
 
 pub fn main() !void {
     std.log.info("Hello, world!\n", .{});
-    const filename = "./c8games/TICTAC";
+    const filename = "./c8games/INVADERS";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
