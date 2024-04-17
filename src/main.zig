@@ -1,6 +1,8 @@
 const std = @import("std");
 const SDL = @import("sdl2");
 
+const fb = @import("display.zig");
+
 pub const log_level: std.log.Level = .info;
 
 // https://en.wikipedia.org/wiki/CHIP-8
@@ -169,16 +171,6 @@ const Chip8 = struct {
             self.ram.memory[offset + index] = byte;
         }
 
-        // var i: usize = 0;
-        //
-        // for (Sprites) |sprite| {
-        //     for (sprite) |val| {
-        //         self.ram.memory[i] = val;
-        //         i += 1;
-        //     }
-        // }
-
-        // std.log.info("memory {any}", .{self.ram.memory});
         _ = print_memory(self);
 
         // try self.cpu.run(self.ram.memory);
@@ -226,38 +218,9 @@ pub fn main() !void {
     var chip8 = Chip8.init();
     try chip8.load_game(gameData);
 
-    try SDL.init(.{
-        .video = true,
-        .events = true,
-        .audio = true,
-    });
-    defer SDL.quit();
-
-    var window = try SDL.createWindow(
-        "SDL2 Wrapper Demo",
-        .{ .centered = {} },
-        .{ .centered = {} },
-        640,
-        480,
-        .{ .vis = .shown },
-    );
-    defer window.destroy();
-
-    var renderer = try SDL.createRenderer(window, null, .{ .accelerated = true });
-    defer renderer.destroy();
     // Display loop
+    var display = try fb.Display.init();
+    defer display.destroy();
 
-    mainLoop: while (true) {
-        while (SDL.pollEvent()) |ev| {
-            switch (ev) {
-                .quit => break :mainLoop,
-                else => {},
-            }
-        }
-
-        try renderer.setColorRGB(0xF7, 0xA4, 0x1D);
-        try renderer.clear();
-
-        renderer.present();
-    }
+    try display.render();
 }
