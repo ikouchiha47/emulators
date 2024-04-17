@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 #
-asdf plugin remove zig                                                                                                                                                   (1) (*master+5) 07:41:54 
+asdf plugin remove zig
 asdf plugin add zig https://github.com/liyu1981/asdf-zig.git
 
 mkdir -p ~/.asdf/custom/zig
