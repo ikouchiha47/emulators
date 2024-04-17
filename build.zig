@@ -1,5 +1,5 @@
 const std = @import("std");
-const Sdk = @import("Sdk.zig");
+const Sdk = @import("sdl");
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
@@ -18,7 +18,7 @@ pub fn build(b: *std.Build) void {
     const sdk = Sdk.init(b, null);
 
     const exe = b.addExecutable(.{
-        .name = "gamebouy",
+        .name = "chipate",
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
         .root_source_file = .{ .path = "src/main.zig" },
@@ -29,7 +29,8 @@ pub fn build(b: *std.Build) void {
     sdk.link(exe, .dynamic); // link SDL2 as a shared library
 
     // Add "sdl2" package that exposes the SDL2 api (like SDL_Init or SDL_CreateWindow)
-    exe.root_module.addImport("sdl2", sdk.getNativeModule());
+    // exe.root_module.addImport("sdl2", sdk.getNativeModule());
+    exe.root_module.addImport("sdl2", sdk.getWrapperModule());
 
     // exe.linkSystemLibrary("SDL2");
     // exe.linkLibC();

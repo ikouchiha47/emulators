@@ -12,11 +12,11 @@ const Memory = struct {
     memory: [0x1000]u8,
 
     //Registers in CPU
-    v: [16]u8,
+    // v: [16]u8,
 
     // CHIP-8 allows memory addressing 2^12,
     // so, 16 bits to cover all the address ranges
-    ir: u16,
+    // ir: u16,
     pc: u16,
 
     stack: [16]u16,
@@ -35,23 +35,23 @@ const LoadRomError = error{
 };
 
 // The first 4 bits are used.
-const Sprites = [16][5]u8{
-    [5]u8{ 0xF0, 0x90, 0x90, 0x90, 0xF0 }, // 0
-    [5]u8{ 0x20, 0x60, 0x20, 0x20, 0x70 }, // 1
-    [5]u8{ 0xF0, 0x10, 0xF0, 0x80, 0xF0 }, // 2
-    [5]u8{ 0xF0, 0x10, 0xF0, 0x10, 0xF0 }, // 3
-    [5]u8{ 0x90, 0x90, 0xF0, 0x10, 0x10 }, // 4
-    [5]u8{ 0xF0, 0x80, 0xF0, 0x10, 0xF0 }, // 5
-    [5]u8{ 0xF0, 0x80, 0xF0, 0x90, 0xF0 }, // 6
-    [5]u8{ 0xF0, 0x10, 0x20, 0x40, 0x40 }, // 7
-    [5]u8{ 0xF0, 0x90, 0xF0, 0x90, 0xF0 }, // 8
-    [5]u8{ 0xF0, 0x90, 0xF0, 0x10, 0x10 }, // 9
-    [5]u8{ 0xF0, 0x90, 0xF0, 0x90, 0x90 }, // A
-    [5]u8{ 0xE0, 0x90, 0xE0, 0x90, 0xE0 }, // B
-    [5]u8{ 0xF0, 0x80, 0xF0, 0x80, 0xF0 }, // C
-    [5]u8{ 0xE0, 0x90, 0x90, 0x90, 0xE0 }, // D
-    [5]u8{ 0xF0, 0x80, 0xF0, 0x80, 0xF0 }, // E
-    [5]u8{ 0xF0, 0x80, 0xF0, 0x80, 0x80 }, // F
+const Sprites = [80]u8{
+    0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
+    0x20, 0x60, 0x20, 0x20, 0x70, // 1
+    0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
+    0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
+    0x90, 0x90, 0xF0, 0x10, 0x10, // 4
+    0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
+    0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
+    0xF0, 0x10, 0x20, 0x40, 0x40, // 7
+    0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
+    0xF0, 0x90, 0xF0, 0x10, 0x10, // 9
+    0xF0, 0x90, 0xF0, 0x90, 0x90, // A
+    0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
+    0xF0, 0x80, 0xF0, 0x80, 0xF0, // C
+    0xE0, 0x90, 0x90, 0x90, 0xE0, // D
+    0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
+    0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 };
 
 const EndOfInstruction = error{
@@ -140,8 +140,8 @@ const Chip8 = struct {
     pub fn init() Chip8 {
         const ram = Memory{
             .memory = [_]u8{0} ** 0x1000,
-            .v = std.mem.zeroes([16]u8),
-            .ir = 0,
+            // .v = std.mem.zeroes([16]u8),
+            // .ir = 0,
             .pc = 0x200,
             .stack = undefined,
             .sp = 0,
@@ -156,30 +156,32 @@ const Chip8 = struct {
     }
 
     pub fn load_game(self: *Chip8, gameData: []u8) !void {
-        var offset: usize = 0x200;
+        const offset: usize = 0x200;
         const endAddress: usize = offset + gameData.len;
 
         if (endAddress > self.ram.memory.len) {
             return LoadRomError.OutOfMemory;
         }
 
+        @memcpy(self.ram.memory[0..80], Sprites[0..80]);
+
         for (0.., gameData) |index, byte| {
             self.ram.memory[offset + index] = byte;
         }
 
-        var i: usize = 0;
-
-        for (Sprites) |sprite| {
-            for (sprite) |val| {
-                self.ram.memory[i] = val;
-                i += 1;
-            }
-        }
+        // var i: usize = 0;
+        //
+        // for (Sprites) |sprite| {
+        //     for (sprite) |val| {
+        //         self.ram.memory[i] = val;
+        //         i += 1;
+        //     }
+        // }
 
         // std.log.info("memory {any}", .{self.ram.memory});
-        // _ = print_memory(self);
+        _ = print_memory(self);
 
-        try self.cpu.run(self.ram.memory);
+        // try self.cpu.run(self.ram.memory);
         return;
     }
 
