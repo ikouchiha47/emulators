@@ -1,4 +1,5 @@
 const std = @import("std");
+const Sdk = @import("Sdk.zig");
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
@@ -14,6 +15,7 @@ pub fn build(b: *std.Build) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
+    const sdk = Sdk.init(b, null);
 
     const exe = b.addExecutable(.{
         .name = "gamebouy",
@@ -23,6 +25,14 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    sdk.link(exe, .dynamic); // link SDL2 as a shared library
+
+    // Add "sdl2" package that exposes the SDL2 api (like SDL_Init or SDL_CreateWindow)
+    exe.root_module.addImport("sdl2", sdk.getNativeModule());
+
+    // exe.linkSystemLibrary("SDL2");
+    // exe.linkLibC();
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default

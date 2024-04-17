@@ -1,4 +1,5 @@
 const std = @import("std");
+const SDL = @import("sdl2");
 
 pub const log_level: std.log.Level = .info;
 
@@ -53,28 +54,80 @@ const Sprites = [16][5]u8{
     [5]u8{ 0xF0, 0x80, 0xF0, 0x80, 0x80 }, // F
 };
 
+const EndOfInstruction = error{
+    OutOfMemory,
+    InvalidInstruction,
+};
+
 const Cpu = struct {
-    // var pc: u8 = 0x200;
-    // var v: [16]u8 = std.mem.zeroes([16]u8);
-    pc: u16,
     v: [16]u8,
 
+    ir: u16,
+    pc: u16,
+
     pub fn init() Cpu {
-        return Cpu{ .pc = 0x200, .v = std.mem.zeroes([16]u8) };
+        return Cpu{
+            .pc = 0x200,
+            .v = std.mem.zeroes([16]u8),
+            .ir = 0,
+        };
+    }
+
+    pub fn run(self: *Cpu, memory: [0x1000]u8) !void {
+        while (true) {
+            try self.execute(memory);
+        }
+
+        std.log.info("register state {any}", .{self.v});
+        return;
     }
 
     // Works on a fetch decode execute cycle
     // In case of Chip8 we only need decode and execute
     // Fetch also can be inside this, since its quite simple
-    pub fn execute(self: *Cpu, memory: [0x1000]u8) void {
+    pub fn execute(self: *Cpu, memory: [0x1000]u8) !void {
+        if (self.pc + 1 > 0x1000) {
+            return EndOfInstruction.OutOfMemory;
+        }
         const lo: u8 = memory[self.pc];
         const hi: u8 = memory[self.pc + 1];
 
         var instruction: u16 = 0;
         instruction = ((instruction | lo) << 8) | hi;
 
-        std.log.info("read {x} {x} {x}", .{ instruction, lo, hi });
+        // std.log.info("read 0x{x} 0x{x:0>2} 0x{x:0>2}", .{ instruction, lo, hi });
+
+        const address = instruction & 0x0FFF;
+        const NN: u8 = @intCast(instruction & 0x00FF);
+        const N: u4 = @intCast(instruction & 0x000F);
+        _ = N;
+
+        // last 4 bits of starting byte
+        const x: u4 = @intCast((instruction & 0x0F00) >> 8);
+
+        // first 4 bits of the ending byte
+        const y: u4 = @intCast((instruction & 0x00F0) >> 4);
+        _ = y;
+
+        try switch ((instruction & 0xF000) >> 12) {
+            0x1 => {
+                std.log.info("jump", .{});
+                self.pc = address;
+            },
+            0x6 => {
+                self.v[x] = NN;
+            },
+            0xA => {
+                self.ir = address;
+            },
+            else => EndOfInstruction.InvalidInstruction,
+        };
+
         self.pc = self.pc + 2;
+
+        if (lo == 0 and hi == 0) {
+            return EndOfInstruction.OutOfMemory;
+        }
 
         return;
     }
@@ -123,10 +176,10 @@ const Chip8 = struct {
             }
         }
 
-        // std.log.info("memory 0x{x}", .{self.ram.memory});
+        // std.log.info("memory {any}", .{self.ram.memory});
         // _ = print_memory(self);
 
-        self.cpu.execute(self.ram.memory);
+        try self.cpu.run(self.ram.memory);
         return;
     }
 
@@ -135,9 +188,9 @@ const Chip8 = struct {
             std.debug.print("0x{x:0<2} ", .{value});
         }
 
-        std.debug.print("\n", .{});
-
-        std.log.info("gamedata bytearray {any}", .{self.ram.memory});
+        // std.debug.print("\n", .{});
+        // std.log.info("gamedata bytearray {any}", .{self.ram.memory});
+        //
         return;
     }
 };
@@ -170,4 +223,39 @@ pub fn main() !void {
 
     var chip8 = Chip8.init();
     try chip8.load_game(gameData);
+
+    try SDL.init(.{
+        .video = true,
+        .events = true,
+        .audio = true,
+    });
+    defer SDL.quit();
+
+    var window = try SDL.createWindow(
+        "SDL2 Wrapper Demo",
+        .{ .centered = {} },
+        .{ .centered = {} },
+        640,
+        480,
+        .{ .vis = .shown },
+    );
+    defer window.destroy();
+
+    var renderer = try SDL.createRenderer(window, null, .{ .accelerated = true });
+    defer renderer.destroy();
+    // Display loop
+
+    mainLoop: while (true) {
+        while (SDL.pollEvent()) |ev| {
+            switch (ev) {
+                .quit => break :mainLoop,
+                else => {},
+            }
+        }
+
+        try renderer.setColorRGB(0xF7, 0xA4, 0x1D);
+        try renderer.clear();
+
+        renderer.present();
+    }
 }
