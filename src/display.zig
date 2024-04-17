@@ -105,7 +105,7 @@ pub const Display = struct {
             switch (ev) {
                 .quit => return Event.quitEvent(),
                 .key_down, .key_up => |key| {
-                    std.log.info("key pressed: {}\n", .{key.scancode});
+                    std.log.debug("key pressed: {}\n", .{key.scancode});
 
                     switch (key.scancode) {
                         .escape => return Event.quitEvent(),
