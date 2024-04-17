@@ -4,6 +4,44 @@ const SDL = @import("sdl2");
 const SCREEN_WIDTH = 64;
 const SCREEN_HEIGHT = 32;
 
+pub const EventKind = enum {
+    KeyDown,
+    KeyUp,
+    Quit,
+    None,
+};
+
+pub const Event = struct {
+    kind: EventKind,
+    data: SDL.Scancode,
+
+    pub fn quitEvent() Event {
+        return Event{
+            .kind = .Quit,
+            .data = .escape,
+        };
+    }
+
+    pub fn noneEvent() Event {
+        return Event{
+            .kind = .None,
+            .data = .escape,
+        };
+    }
+
+    pub fn keyEvent(event: SDL.Event, key: SDL.Scancode) Event {
+        const kind: EventKind = switch (event) {
+            .key_up => .KeyUp,
+            .key_down => .KeyDown,
+            else => .None,
+        };
+        return Event{
+            .kind = kind,
+            .data = key,
+        };
+    }
+};
+
 pub const Display = struct {
     window: SDL.Window,
     renderer: SDL.Renderer,
@@ -25,6 +63,7 @@ pub const Display = struct {
         );
 
         const renderer = try SDL.createRenderer(window, null, .{ .accelerated = true });
+        try renderer.setLogicalSize(64, 32);
 
         const display = Display{
             .window = window,
@@ -38,7 +77,7 @@ pub const Display = struct {
         self: *Display,
         screen: *[SCREEN_HEIGHT][SCREEN_WIDTH]u8,
     ) !void {
-        // std.debug.print("display screen data {any}", .{screen});
+        // std.log.info("display screen data {any}", .{screen});
 
         try self.renderer.setColorRGB(
             0,
@@ -55,33 +94,29 @@ pub const Display = struct {
                 }
             }
         }
+
+        self.renderer.present();
     }
 
-    pub fn render(self: *Display) !void {
-        mainLoop: while (true) {
-            while (SDL.pollEvent()) |ev| {
-                switch (ev) {
-                    .quit => break :mainLoop,
-                    .key_down => |key| {
-                        switch (key.scancode) {
-                            .escape => {
-                                std.log.info("key pressed: {}\n", .{key.scancode});
-                                break :mainLoop;
-                            },
-                            else => std.log.info("key pressed: {}\n", .{key.scancode}),
-                        }
-                    },
-                    else => {
-                        break :mainLoop;
-                    },
-                }
+    pub fn getEvent(self: *Display) Event {
+        _ = self;
+
+        while (SDL.pollEvent()) |ev| {
+            switch (ev) {
+                .quit => return Event.quitEvent(),
+                .key_down, .key_up => |key| {
+                    std.log.info("key pressed: {}\n", .{key.scancode});
+
+                    switch (key.scancode) {
+                        .escape => return Event.quitEvent(),
+                        else => return Event.keyEvent(ev, key.scancode),
+                    }
+                },
+                else => {},
             }
-
-            try self.renderer.setColorRGB(0, 0, 0);
-            try self.renderer.clear();
-
-            self.renderer.present();
         }
+
+        return Event.noneEvent();
     }
 
     pub fn destroy(self: *Display) void {

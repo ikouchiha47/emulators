@@ -1,10 +1,12 @@
 const std = @import("std");
+const SDL = @import("sdl2");
+
 const fb = @import("display.zig");
 
 const SCREEN_WIDTH = 64;
 const SCREEN_HEIGHT = 32;
 
-pub const log_level: std.log.Level = .info;
+pub const std_options = .{ .log_level = .info };
 
 // https://en.wikipedia.org/wiki/CHIP-8
 // https://github.com/mattmikolay/chip-8/wiki/Mastering-CHIP‐8
@@ -74,6 +76,15 @@ const ExecutionError = error{
     UnknownInstruction,
 };
 
+fn print_memory(gameData: []u8) void {
+    for (gameData) |value| {
+        std.debug.print("0x{x:0>2} ", .{value});
+    }
+
+    std.debug.print("\n", .{});
+    return;
+}
+
 const Cpu = struct {
     rnd: std.rand.Xoshiro256,
 
@@ -102,18 +113,30 @@ const Cpu = struct {
         };
     }
 
-    pub fn run(self: *Cpu, memory: [0x1000]u8) !void {
-        var runLen: i32 = 400;
+    pub fn run(self: *Cpu, memory: *[0x1000]u8) !void {
+        // var runLen: i32 = 20;
+        // const runLen = memory.len
 
-        while (runLen > 0) {
-            try self.execute(memory);
-            try self.display.redraw(&self.screen);
+        defer self.display.destroy();
+
+        while (true) {
+            self.execute(memory) catch break;
+            self.display.redraw(&self.screen) catch break;
 
             std.time.sleep(16 * 1000 * 1000);
-            runLen -= 1;
+
+            while (true) {
+                const ev = self.display.getEvent();
+                switch (ev.kind) {
+                    .None => break,
+                    .Quit => return,
+                    .KeyUp => {},
+                    .KeyDown => {},
+                }
+            }
         }
 
-        std.log.info("register state {any}", .{self.v});
+        std.log.debug("register state {any}", .{self.v});
         return;
     }
 
@@ -127,7 +150,7 @@ const Cpu = struct {
     // Works on a fetch decode execute cycle
     // In case of Chip8 we only need decode and execute
     // Fetch also can be inside this, since its quite simple
-    pub fn execute(self: *Cpu, memory: [0x1000]u8) !void {
+    pub fn execute(self: *Cpu, memory: *[0x1000]u8) !void {
         if (self.pc + 1 > 0x1000) {
             return ExecutionError.OutOfMemory;
         }
@@ -135,29 +158,30 @@ const Cpu = struct {
         const lo: u8 = memory[self.pc];
         const hi: u8 = memory[self.pc + 1];
 
-        const prev_pc = self.pc;
-        _ = prev_pc;
+        // const prev_pc = self.pc;
+        // _ = prev_pc;
 
-        std.log.info("\npc: 0x{x:0>4}, pc+1: 0x{x:0>4}", .{ self.pc, self.pc + 1 });
+        std.log.debug("\npc: 0x{x:0>4}, pc+1: 0x{x:0>4}", .{ self.pc, self.pc + 1 });
         self.pc += 2;
 
         var instruction: u16 = 0;
         instruction = ((instruction | lo) << 8) | hi;
 
-        std.log.info("read inst: 0x{x} lo: 0x{x:0>2} hi: 0x{x:0>2} pc: 0x{x:0>4}", .{ instruction, lo, hi, self.pc });
+        std.log.debug("read inst: 0x{x} lo: 0x{x:0>2} hi: 0x{x:0>2} pc: 0x{x:0>4}", .{ instruction, lo, hi, self.pc });
 
         const address: u16 = instruction & 0x0FFF;
         const nn: u8 = @intCast(instruction & 0x00FF);
         const n: u4 = @intCast(instruction & 0x000F);
 
-        // std.log.info("address 0x{x}", .{address});
+        // std.log.debug("address 0x{x}", .{address});
         // last 4 bits of starting byte
         const x: u4 = @intCast((instruction & 0x0F00) >> 8);
 
         // first 4 bits of the ending byte
         const y: u4 = @intCast((instruction & 0x00F0) >> 4);
 
-        // std.log.info("instruction 0x{x} 0x{x:0<2}", .{ instruction, (instruction & 0xf000) >> 12 });
+        // std.log.debug("memory {any}", .{memory});
+        // std.log.debug("value at address 0x{x:0>4} 0x{x:0>4}", .{ address, memory[address] });
 
         try switch ((instruction & 0xF000) >> 12) {
             0x0 => {
@@ -169,61 +193,75 @@ const Cpu = struct {
                 }
             },
             0x1 => {
-                std.log.info("jump 0x{x:0>2}", .{address});
+                std.log.debug("jump 0x{x:0>2}", .{address});
                 if (address > 0x1000) {
                     return ExecutionError.OutOfMemory;
                 }
                 self.pc = address;
             },
             0x2 => {
-                std.log.info("call subroutine", .{});
+                std.log.debug("call subroutine", .{});
                 self.stack[self.sp] = self.pc;
                 self.sp += 1;
                 self.pc = address;
             },
             0x3 => {
+                std.log.debug("0x3XNN cond equal", .{});
                 if (self.v[x] == nn) {
                     self.pc += 2;
                 }
             },
             0x4 => {
+                std.log.debug("0x4XNN cond not equal", .{});
                 if (self.v[x] != nn) {
                     self.pc += 2;
                 }
             },
             0x5 => {
+                std.log.debug("0x5XY0 increment pc if v[x] == v[y]", .{});
+
                 if (self.v[x] == self.v[y]) {
                     self.pc += 2;
                 }
             },
             0x6 => {
+                std.log.debug("0x6XNN assign nn to x", .{});
                 self.v[x] = nn;
             },
             0x7 => {
+                std.log.debug("add without carry 0x7XNN", .{});
+
                 const res = @addWithOverflow(self.v[x], nn);
                 self.v[x] = res[0];
             },
             0x8 => {
+                std.log.debug("do math 0x8XYN", .{});
+
                 try self.doMath(n, x, y);
             },
             0x9 => {
+                std.log.debug("cond 0x9 skip to NN", .{});
+
                 if (self.v[x] != self.v[y]) {
                     self.pc += 2;
                 }
             },
             0xA => {
+                std.log.debug("0xA set instruction pointer", .{});
                 self.ir = address;
             },
             0xB => {
+                std.log.debug("0xBNNN jump to NNN", .{});
                 self.pc = address + self.v[0];
             },
             0xC => {
-                std.log.info("set vx to rand() & nn", .{});
+                std.log.debug("0xCXNN set vx to rand() & nn", .{});
                 const randnum: u8 = self.rnd.random().int(u8);
 
                 self.v[x] = randnum & nn;
             },
             0xD => {
+                std.log.debug("0xDXYN display N height at XY", .{});
                 const vx = self.v[x] & 63; // clamp the value to screen width
                 const vy = self.v[y] & 31; // clamp the value to screen height
                 const height = n;
@@ -231,15 +269,15 @@ const Cpu = struct {
                 try self.draw(memory, vx, vy, height);
             },
             0xE => {
-                std.log.info("skipping 0xE for now", .{});
+                std.log.debug("0xE handle keyboard event. 0x{x:0>4}", .{instruction});
             },
             0xF => {
-                std.log.info("skipping 0xF for now", .{});
+                std.log.debug("0xF handle timer and other stuff 0x{x:0>4}", .{instruction});
             },
             else => ExecutionError.InvalidInstruction,
         };
 
-        std.log.info("register state {any}", .{self.v});
+        std.log.debug("register state {any}", .{self.v});
 
         if (lo == 0 and hi == 0) {
             return ExecutionError.OutOfMemory;
@@ -255,7 +293,7 @@ const Cpu = struct {
         }
     }
 
-    fn draw(self: *Cpu, mem: [0x1000]u8, vx: u8, vy: u8, height: u4) !void {
+    fn draw(self: *Cpu, mem: *[0x1000]u8, vx: u8, vy: u8, height: u4) !void {
         self.v[0xf] = 0;
 
         var n: u4 = 0;
@@ -286,8 +324,6 @@ const Cpu = struct {
             y += 1;
             if (y == 32) break;
         }
-
-        // std.log.info("lalalala {any}", .{self.screen});
     }
 };
 
@@ -319,27 +355,10 @@ const Chip8 = struct {
             self.ram.memory[offset + index] = byte;
         }
 
-        _ = self.print_memory(gameData);
+        // _ = print_memory(gameData);
+        // std.debug.print("{any}\n", .{self.ram.memory});
 
-        std.debug.print("{any}\n", .{gameData});
-
-        try self.cpu.run(self.ram.memory);
-        return;
-    }
-
-    pub fn print_memory(self: *Chip8, gameData: []u8) void {
-        _ = self;
-        for (gameData) |value| {
-            std.debug.print("0x{x:0>2} ", .{value});
-        }
-
-        // for (self.ram.memory) |value| {
-        //     std.debug.print("0x{x:0<2} ", .{value});
-        // }
-
-        std.debug.print("\n", .{});
-        // std.log.info("gamedata bytearray {any}", .{self.ram.memory});
-        //
+        try self.cpu.run(&self.ram.memory);
         return;
     }
 };
@@ -349,14 +368,14 @@ pub fn readFile(filename: []const u8, allocator: std.mem.Allocator) ![]u8 {
     defer file.close();
 
     const fileSize = (try file.stat()).size;
-    std.log.info("fileSize {}\n", .{fileSize});
+    std.log.debug("fileSize {}\n", .{fileSize});
 
     const buffer = try file.readToEndAlloc(allocator, fileSize);
     return buffer;
 }
 
 pub fn main() !void {
-    std.log.info("Hello, world!\n", .{});
+    // std.log.debug("Hello, world!\n", .{});
     const filename = "./c8games/IBMLOGO";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -366,14 +385,6 @@ pub fn main() !void {
     const gameData = try readFile(filename, allocator);
     defer allocator.free(gameData);
 
-    // std.log.info("File contents: {any}\n", .{fileContents});
-
     var chip8 = try Chip8.init();
     try chip8.load_game(gameData);
-
-    // Display loop
-    var display = try fb.Display.init();
-    defer display.destroy();
-
-    try display.render();
 }
