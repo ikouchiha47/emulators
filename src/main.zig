@@ -97,6 +97,8 @@ const Cpu = struct {
     key_pressed_index: u8,
     timestamp: i64,
 
+    ram: *Memory,
+
     pub fn init() !Cpu {
         const display = try fb.Display.init();
 
@@ -115,20 +117,22 @@ const Cpu = struct {
             .rnd = std.rand.DefaultPrng.init(0),
             .key_pressed_index = 0,
             .timestamp = 0,
+            .ram = undefined,
         };
     }
 
-    pub fn run(self: *Cpu, memory: *[0x1000]u8) !void {
+    pub fn run(self: *Cpu, ram: *Memory) !void {
         // var runLen: i32 = 20;
         // const runLen = memory.len
 
         defer self.display.destroy();
+        self.ram = ram;
 
         while (true) {
             if (self.cpu_state == CpuState.Running) {
                 std.log.debug("running", .{});
 
-                const next_time = self.execute(memory) catch 160;
+                const next_time = self.execute() catch 160;
                 self.display.redraw(&self.screen) catch break;
 
                 std.time.sleep(next_time * 1000);
@@ -189,17 +193,16 @@ const Cpu = struct {
 
         if (mappedKey) |value| {
             if (value > 0xf) {
-                return ExecutionError.UnregisteredKey;
+                return; //ExecutionError.UnregisteredKey;
             }
             if (self.cpu_state == CpuState.IOWaiting and self.keys[value] != pressed) {
                 self.cpu_state = CpuState.Running;
                 self.v[self.key_pressed_index] = @intCast(value);
             }
 
+            std.log.info("key pressed {any} {any} {any} {any}", .{ key, pressed, value, self.keys[value] });
             self.keys[value] = pressed;
         }
-
-        std.log.info("key pressed {d} {any}", .{ key, pressed });
     }
 
     fn nextTick(self: *Cpu) bool {
@@ -219,7 +222,8 @@ const Cpu = struct {
         return false;
     }
 
-    pub fn doEf(self: *Cpu, x: u4, nn: u8, memory: *[0x1000]u8) !u32 {
+    pub fn doEf(self: *Cpu, x: u4, nn: u8) !u32 {
+        const memory = &self.ram.memory;
         // validate x in range of self.v
 
         try switch (nn) {
@@ -346,7 +350,9 @@ const Cpu = struct {
     // Works on a fetch decode execute cycle
     // In case of Chip8 we only need decode and execute
     // Fetch also can be inside this, since its quite simple
-    pub fn execute(self: *Cpu, memory: *[0x1000]u8) !u32 {
+    pub fn execute(self: *Cpu) !u32 {
+        const memory = &self.ram.memory;
+
         var next_time: u32 = 0;
 
         if (self.pc + 1 > 0x1000) {
@@ -492,7 +498,7 @@ const Cpu = struct {
                 const vx = self.v[x] & 63; // clamp the value to screen width
                 const vy = self.v[y] & 31; // clamp the value to screen height
 
-                try self.draw(memory, vx, vy, n);
+                try self.draw(vx, vy, n);
 
                 next_time = times.DRAW;
             },
@@ -516,7 +522,7 @@ const Cpu = struct {
             },
             0xF => {
                 std.log.debug("0xF handle timer and other stuff 0x{x:0>4}", .{instruction});
-                next_time = try self.doEf(x, nn, memory);
+                next_time = try self.doEf(x, nn);
             },
             else => ExecutionError.InvalidInstruction,
         };
@@ -530,7 +536,9 @@ const Cpu = struct {
         return next_time;
     }
 
-    fn draw(self: *Cpu, mem: *[0x1000]u8, vx: u8, vy: u8, height: u4) !void {
+    fn draw(self: *Cpu, vx: u8, vy: u8, height: u4) !void {
+        const mem = &self.ram.memory;
+
         self.v[0xf] = 0;
 
         var n: u4 = 0;
@@ -595,7 +603,7 @@ const Chip8 = struct {
         // _ = print_memory(gameData);
         // std.debug.print("{any}\n", .{self.ram.memory});
 
-        try self.cpu.run(&self.ram.memory);
+        try self.cpu.run(&self.ram);
         return;
     }
 };
