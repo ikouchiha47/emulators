@@ -98,6 +98,15 @@ pub const Display = struct {
         self.renderer.present();
     }
 
+    pub fn clearScreen(self: *Display, screen: *[SCREEN_HEIGHT][SCREEN_WIDTH]u8) void {
+        _ = self;
+
+        var y: u8 = 0;
+        while (y < SCREEN_HEIGHT) : (y += 1) {
+            screen[y] = std.mem.zeroes([SCREEN_WIDTH]u8);
+        }
+    }
+
     pub fn getEvent(self: *Display) Event {
         _ = self;
 

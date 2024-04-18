@@ -29,19 +29,14 @@ const Memory = struct {
     // sp: u8,
 
     // Times
-    delay_timer: u8,
-    sound_timer: u8,
-
-    // Input
-    keys: [16]bool,
 
     pub fn init() Memory {
         return Memory{
             .memory = [_]u8{0} ** 0x1000,
             .pc = 0x200,
-            .delay_timer = 0,
-            .sound_timer = 0,
-            .keys = undefined,
+            // .delay_timer = 0,
+            //.sound_timer = 0,
+            //.keys = undefined,
         };
     }
 };
@@ -95,6 +90,12 @@ const Cpu = struct {
     stack: [16]u16,
     sp: u8,
 
+    delay_timer: u8,
+    sound_timer: u8,
+
+    // Input
+    keys: [16]bool,
+
     display: fb.Display,
     screen: [SCREEN_HEIGHT][SCREEN_WIDTH]u8,
 
@@ -109,6 +110,9 @@ const Cpu = struct {
             .stack = std.mem.zeroes([16]u16),
             .display = display,
             .screen = std.mem.zeroes([SCREEN_HEIGHT][SCREEN_WIDTH]u8),
+            .delay_timer = 0,
+            .sound_timer = 0,
+            .keys = undefined,
             .rnd = std.rand.DefaultPrng.init(0),
         };
     }
@@ -140,9 +144,67 @@ const Cpu = struct {
         return;
     }
 
+    pub fn doEf(self: *Cpu, x: u4, nn: u8) !void {
+        // validate x in range of self.v
+        //
+        switch (nn) {
+            0x07 => {
+                self.v[x] = self.delay_timer;
+            },
+            0x0a => {},
+            0x15 => {
+                self.delay_timer = self.v[x];
+            },
+            0x18 => {
+                self.sound_timer = self.v[x];
+            },
+            0x1e => {
+                const result: u16 = @addWithOverflow(self.v[x], self.ir);
+                self.ir = result[0];
+            },
+            0x29 => {},
+            0x33 => {},
+            0x55 => {},
+            0x65 => {},
+        }
+    }
+
     pub fn doMath(self: *Cpu, op: u4, x: u4, y: u4) !void {
         try switch (op) {
             0 => self.v[x] = self.v[y],
+            1 => self.v[x] |= self.v[y],
+            2 => self.v[x] &= self.v[y],
+            3 => self.v[x] ^= self.v[y],
+            4 => {
+                const res = @addWithOverflow(self.v[x], self.v[y]);
+
+                self.v[x] = res[0];
+                self.v[0xf] = if (res[1] > 0) 1 else 0;
+            },
+            5 => {
+                self.v[0xf] = if (self.v[x] >= self.v[y]) 1 else 0;
+
+                const res = @subWithOverflow(self.v[x], self.v[y]);
+                self.v[x] = res[0];
+            },
+            6 => {
+                // get least significant bit
+                const lsb: u8 = self.v[x] & 0x01;
+                self.v[0xf] = lsb;
+                self.v[x] = self.v[x] >> 1;
+            },
+            7 => {
+                self.v[0xf] = if (self.v[y] >= self.v[x]) 1 else 0;
+
+                const res = @subWithOverflow(self.v[y], self.v[x]);
+                self.v[x] = res[0];
+            },
+            0xe => {
+                // most sb
+                const msb: u8 = self.v[x] & 0x80;
+                self.v[0xf] = msb;
+                self.v[x] = self.v[x] << 1;
+            },
             else => ExecutionError.UnknownInstruction,
         };
     }
@@ -186,10 +248,12 @@ const Cpu = struct {
         try switch ((instruction & 0xF000) >> 12) {
             0x0 => {
                 if (nn == 0xe0) {
-                    self.clearScreen();
+                    self.display.clearScreen(&self.screen);
                 } else if (nn == 0xee) {
                     self.sp -= 1;
                     self.pc = self.stack[self.sp];
+                } else {
+                    return ExecutionError.InvalidInstruction;
                 }
             },
             0x1 => {
@@ -284,13 +348,6 @@ const Cpu = struct {
         }
 
         return;
-    }
-
-    fn clearScreen(self: *Cpu) void {
-        var y: u8 = 0;
-        while (y < SCREEN_HEIGHT) : (y += 1) {
-            self.screen[y] = std.mem.zeroes([SCREEN_WIDTH]u8);
-        }
     }
 
     fn draw(self: *Cpu, mem: *[0x1000]u8, vx: u8, vy: u8, height: u4) !void {
