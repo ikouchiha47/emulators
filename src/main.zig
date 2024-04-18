@@ -80,6 +80,11 @@ fn print_memory(gameData: []u8) void {
     return;
 }
 
+const CpuState = enum {
+    Running,
+    IOWaiting,
+};
+
 const Cpu = struct {
     rnd: std.rand.Xoshiro256,
 
@@ -99,6 +104,8 @@ const Cpu = struct {
     display: fb.Display,
     screen: [SCREEN_HEIGHT][SCREEN_WIDTH]u8,
 
+    cpu_state: CpuState,
+
     pub fn init() !Cpu {
         const display = try fb.Display.init();
 
@@ -113,6 +120,7 @@ const Cpu = struct {
             .delay_timer = 0,
             .sound_timer = 0,
             .keys = undefined,
+            .cpu_state = CpuState.Running,
             .rnd = std.rand.DefaultPrng.init(0),
         };
     }
@@ -124,10 +132,15 @@ const Cpu = struct {
         defer self.display.destroy();
 
         while (true) {
-            self.execute(memory) catch break;
-            self.display.redraw(&self.screen) catch break;
+            if (self.cpu_state == CpuState.Running) {
+                self.execute(memory) catch break;
+                self.display.redraw(&self.screen) catch break;
 
-            std.time.sleep(16 * 1000 * 1000);
+                std.time.sleep(16 * 1000 * 1000);
+            } else {
+                std.log.info("waiting for cpu input", .{});
+                std.time.sleep(16 * 1000 * 1000);
+            }
 
             while (true) {
                 const ev = self.display.getEvent();
@@ -151,7 +164,9 @@ const Cpu = struct {
             0x07 => {
                 self.v[x] = self.delay_timer;
             },
-            0x0a => {},
+            0x0a => {
+                self.cpu_state = CpuState.IOWaiting;
+            },
             0x15 => {
                 self.delay_timer = self.v[x];
             },
@@ -162,10 +177,34 @@ const Cpu = struct {
                 const result: u16 = @addWithOverflow(self.v[x], self.ir);
                 self.ir = result[0];
             },
-            0x29 => {},
-            0x33 => {},
-            0x55 => {},
-            0x65 => {},
+            0x29 => {
+                // for rendeirng value 3
+                // since each value is 5 byte
+                // for n its n * 5
+                self.ir = self.v[x] * 5;
+            },
+            0x33 => {
+                var number = self.v[x];
+                self.memory[self.ir] = number / 100;
+
+                number = number % 100;
+                self.memory[self.ir + 1] = number / 10;
+
+                number = number % 10;
+                self.memory[self.ir + 2] = number;
+            },
+            0x55 => {
+                var i: u4 = 0;
+                while (i <= x) : (i += 1) {
+                    self.memory[self.ir + i] = self.v[i];
+                }
+            },
+            0x65 => {
+                var i: u4 = 0;
+                while (i <= x) : (i += 1) {
+                    self.v[i] = self.memory[self.ir + i];
+                }
+            },
         }
     }
 
@@ -433,7 +472,7 @@ pub fn readFile(filename: []const u8, allocator: std.mem.Allocator) ![]u8 {
 
 pub fn main() !void {
     // std.log.debug("Hello, world!\n", .{});
-    const filename = "./c8games/IBMLOGO";
+    const filename = "./c8games/INVADERS";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
