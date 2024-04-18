@@ -1,4 +1,5 @@
 const std = @import("std");
+const times = @import("times.zig");
 const SDL = @import("sdl2");
 
 const fb = @import("display.zig");
@@ -6,37 +7,23 @@ const fb = @import("display.zig");
 const SCREEN_WIDTH = 64;
 const SCREEN_HEIGHT = 32;
 
-pub const std_options = .{ .log_level = .debug };
+pub const std_options = .{ .log_level = .info };
 
-// https://en.wikipedia.org/wiki/CHIP-8
-// https://github.com/mattmikolay/chip-8/wiki/Mastering-CHIP‐8
-// https://jackson-s.me/2019/07/13/Chip-8-Instruction-Scheduling-and-Frequency.html
 // Chip-8 was capable of accessing 4KB of RAM (4096 Bytes)
 // Location (0x000) to (0xFFF) (0 to 4095)
 const Memory = struct {
     // 4KB Memory
     memory: [0x1000]u8,
 
-    //Registers in CPU
-    // v: [16]u8,
-
     // CHIP-8 allows memory addressing 2^12,
     // so, 16 bits to cover all the address ranges
     // ir: u16,
     pc: u16,
 
-    // stack: [16]u16,
-    // sp: u8,
-
-    // Times
-
     pub fn init() Memory {
         return Memory{
             .memory = [_]u8{0} ** 0x1000,
             .pc = 0x200,
-            // .delay_timer = 0,
-            //.sound_timer = 0,
-            //.keys = undefined,
         };
     }
 };
@@ -69,6 +56,7 @@ const ExecutionError = error{
     OutOfMemory,
     InvalidInstruction,
     UnknownInstruction,
+    UnregisteredKey,
 };
 
 fn print_memory(gameData: []u8) void {
@@ -106,6 +94,9 @@ const Cpu = struct {
 
     cpu_state: CpuState,
 
+    key_pressed_index: u8,
+    timestamp: i64,
+
     pub fn init() !Cpu {
         const display = try fb.Display.init();
 
@@ -119,9 +110,11 @@ const Cpu = struct {
             .screen = std.mem.zeroes([SCREEN_HEIGHT][SCREEN_WIDTH]u8),
             .delay_timer = 0,
             .sound_timer = 0,
-            .keys = undefined,
+            .keys = [_]bool{false} ** 16,
             .cpu_state = CpuState.Running,
             .rnd = std.rand.DefaultPrng.init(0),
+            .key_pressed_index = 0,
+            .timestamp = 0,
         };
     }
 
@@ -133,23 +126,30 @@ const Cpu = struct {
 
         while (true) {
             if (self.cpu_state == CpuState.Running) {
-                std.log.debug("\n", .{});
-                self.execute(memory) catch break;
+                std.log.debug("running", .{});
+
+                const next_time = self.execute(memory) catch 160;
                 self.display.redraw(&self.screen) catch break;
 
-                std.time.sleep(16 * 1000 * 1000);
+                std.time.sleep(next_time * 1000);
             } else {
                 std.log.info("waiting for cpu input", .{});
                 std.time.sleep(16 * 1000 * 1000);
             }
+
+            _ = self.nextTick();
 
             while (true) {
                 const ev = self.display.getEvent();
                 switch (ev.kind) {
                     .None => break,
                     .Quit => return,
-                    .KeyUp => {},
-                    .KeyDown => {},
+                    .KeyUp => {
+                        try self.updateKey(ev.data, false);
+                    },
+                    .KeyDown => {
+                        try self.updateKey(ev.data, true);
+                    },
                 }
             }
         }
@@ -158,31 +158,102 @@ const Cpu = struct {
         return;
     }
 
-    pub fn doEf(self: *Cpu, x: u4, nn: u8, memory: *[0x1000]u8) !void {
+    fn getMappedKey(key: SDL.Scancode) ?u32 {
+        var chip8Key: ?u32 = undefined;
+
+        switch (key) {
+            .@"1" => chip8Key = 0x1,
+            .@"2" => chip8Key = 0x2,
+            .@"3" => chip8Key = 0x3,
+            .@"4" => chip8Key = 0xc,
+            .q => chip8Key = 0x4,
+            .w => chip8Key = 0x5,
+            .e => chip8Key = 0x6,
+            .r => chip8Key = 0xd,
+            .a => chip8Key = 0x7,
+            .s => chip8Key = 0x8,
+            .d => chip8Key = 0x9,
+            .f => chip8Key = 0xe,
+            .z => chip8Key = 0xa,
+            .x => chip8Key = 0x0,
+            .c => chip8Key = 0xb,
+            .v => chip8Key = 0xf,
+            else => return undefined,
+        }
+
+        return chip8Key;
+    }
+
+    fn updateKey(self: *Cpu, key: SDL.Scancode, pressed: bool) !void {
+        const mappedKey = getMappedKey(key);
+
+        if (mappedKey) |value| {
+            if (value > 0xf) {
+                return ExecutionError.UnregisteredKey;
+            }
+            if (self.cpu_state == CpuState.IOWaiting and self.keys[value] != pressed) {
+                self.cpu_state = CpuState.Running;
+                self.v[self.key_pressed_index] = @intCast(value);
+            }
+
+            self.keys[value] = pressed;
+        }
+
+        std.log.info("key pressed {d} {any}", .{ key, pressed });
+    }
+
+    fn nextTick(self: *Cpu) bool {
+        if (self.timestamp == 0) {
+            self.timestamp = std.time.milliTimestamp();
+            return false;
+        }
+
+        const now = std.time.milliTimestamp();
+        const diff = now - self.timestamp;
+
+        if (diff > 16 and self.delay_timer > 0) {
+            self.delay_timer -= 1;
+            return true;
+        }
+
+        return false;
+    }
+
+    pub fn doEf(self: *Cpu, x: u4, nn: u8, memory: *[0x1000]u8) !u32 {
         // validate x in range of self.v
-        //
+
         try switch (nn) {
             0x07 => {
                 self.v[x] = self.delay_timer;
+                return times.GET_DELAY_TIMER;
             },
             0x0a => {
+                // we store the register x,
+                // on key_pressed_index,
+                // we set the value of V(x)
+                self.key_pressed_index = x;
                 self.cpu_state = CpuState.IOWaiting;
+                return times.GET_KEY;
             },
             0x15 => {
                 self.delay_timer = self.v[x];
+                return times.GET_DELAY_TIMER;
             },
             0x18 => {
                 self.sound_timer = self.v[x];
+                return times.SET_SOUND_TIMER;
             },
             0x1e => {
                 const result = @addWithOverflow(self.v[x], self.ir);
                 self.ir = result[0];
+                return times.ADD_TO_INDEX;
             },
             0x29 => {
-                // for rendeirng value 3
+                // for rendeirng value (self.v[x]=) 3
                 // since each value is 5 byte
                 // for n its n * 5
                 self.ir = self.v[x] * 5;
+                return times.SET_FONT;
             },
             0x33 => {
                 const number = self.v[x];
@@ -190,23 +261,29 @@ const Cpu = struct {
                 memory[self.ir] = number / 100;
                 memory[self.ir + 1] = (number % 100) / 10;
                 memory[self.ir + 2] = number % 10;
+
+                return times.BCD;
             },
             0x55 => {
                 var i: u4 = 0;
                 while (i <= x) : (i += 1) {
                     memory[self.ir + i] = self.v[i];
                 }
+
+                return times.STORE_MEM;
             },
             0x65 => {
                 var i: u4 = 0;
                 while (i <= x) : (i += 1) {
                     self.v[i] = memory[self.ir + i];
                 }
+
+                return times.LOAD_MEM;
             },
-            else => ExecutionError.InvalidInstruction,
+            else => return ExecutionError.InvalidInstruction,
         };
 
-        return;
+        return 0;
     }
 
     fn checkBitAndShift(self: *Cpu, xreg: u8, msb: bool) void {
@@ -269,7 +346,9 @@ const Cpu = struct {
     // Works on a fetch decode execute cycle
     // In case of Chip8 we only need decode and execute
     // Fetch also can be inside this, since its quite simple
-    pub fn execute(self: *Cpu, memory: *[0x1000]u8) !void {
+    pub fn execute(self: *Cpu, memory: *[0x1000]u8) !u32 {
+        var next_time: u32 = 0;
+
         if (self.pc + 1 > 0x1000) {
             return ExecutionError.OutOfMemory;
         }
@@ -278,7 +357,6 @@ const Cpu = struct {
         const hi: u8 = memory[self.pc + 1];
 
         const prev_pc = self.pc;
-        // _ = prev_pc;
 
         // std.log.debug("\npc: 0x{x:0>4}, pc+1: 0x{x:0>4}", .{ self.pc, self.pc + 1 });
         self.pc += 2;
@@ -306,13 +384,17 @@ const Cpu = struct {
 
         try switch ((instruction & 0xF000) >> 12) {
             0x0 => {
-                if (nn == 0xe0) {
-                    self.display.clearScreen(&self.screen);
-                } else if (nn == 0xee) {
-                    self.sp -= 1;
-                    self.pc = self.stack[self.sp];
-                } else {
-                    return ExecutionError.InvalidInstruction;
+                switch (nn) {
+                    0xe0 => {
+                        self.display.clearScreen(&self.screen);
+                        next_time = times.CLEAR_SCREEN;
+                    },
+                    0xee => {
+                        self.sp -= 1;
+                        self.pc = self.stack[self.sp];
+                        next_time = times.RETURN;
+                    },
+                    else => return ExecutionError.InvalidInstruction,
                 }
             },
             0x1 => {
@@ -321,24 +403,31 @@ const Cpu = struct {
                     return ExecutionError.OutOfMemory;
                 }
                 self.pc = address;
+                next_time = times.JUMP;
             },
             0x2 => {
                 std.log.debug("call subroutine", .{});
                 self.stack[self.sp] = self.pc;
                 self.sp += 1;
                 self.pc = address;
+
+                next_time = times.CALL;
             },
             0x3 => {
                 std.log.debug("0x3XNN cond equal", .{});
                 if (self.v[x] == nn) {
                     self.pc += 2;
                 }
+
+                next_time = times.SKIP_3X;
             },
             0x4 => {
                 std.log.debug("0x4XNN cond not equal", .{});
                 if (self.v[x] != nn) {
                     self.pc += 2;
                 }
+
+                next_time = times.SKIP_4X;
             },
             0x5 => {
                 std.log.debug("0x5XY0 increment pc if v[x] == v[y]", .{});
@@ -346,21 +435,28 @@ const Cpu = struct {
                 if (self.v[x] == self.v[y]) {
                     self.pc += 2;
                 }
+
+                next_time = times.SKIP_5X;
             },
             0x6 => {
                 std.log.debug("0x6XNN assign nn to x", .{});
                 self.v[x] = nn;
+
+                next_time = times.SET_REGISTER;
             },
             0x7 => {
                 std.log.debug("add without carry 0x7XNN", .{});
 
                 const res = @addWithOverflow(self.v[x], nn);
                 self.v[x] = res[0];
+
+                next_time = times.ADD;
             },
             0x8 => {
                 std.log.debug("do math 0x8XYN", .{});
-
                 try self.doMath(n, x, y);
+
+                next_time = times.ARITHMETIC;
             },
             0x9 => {
                 std.log.debug("cond 0x9 skip to NN", .{});
@@ -368,21 +464,28 @@ const Cpu = struct {
                 if (self.v[x] != self.v[y]) {
                     self.pc += 2;
                 }
+
+                next_time = times.SKIP_9X;
             },
             0xA => {
                 std.log.debug("0xA set instruction pointer", .{});
                 self.ir = address;
+
+                next_time = times.SET_INDEX;
             },
             0xB => {
                 std.log.debug("0xBNNN jump to NNN", .{});
                 const v0: u16 = self.v[0];
                 self.pc = address + v0;
+
+                next_time = times.JUMP_WITH_OFFSET;
             },
             0xC => {
                 std.log.debug("0xCXNN set vx to rand() & nn", .{});
                 const randnum: u8 = self.rnd.random().int(u8);
-
                 self.v[x] = randnum & nn;
+
+                next_time = times.GET_RANDOM;
             },
             0xD => {
                 std.log.debug("0xDXYN display N height at XY", .{});
@@ -390,13 +493,30 @@ const Cpu = struct {
                 const vy = self.v[y] & 31; // clamp the value to screen height
 
                 try self.draw(memory, vx, vy, n);
+
+                next_time = times.DRAW;
             },
             0xE => {
                 std.log.debug("0xE handle keyboard event. 0x{x:0>4}", .{instruction});
+                const key = self.v[x];
+                switch (nn) {
+                    0x9E => {
+                        if (self.keys[key]) {
+                            self.pc += 2;
+                        }
+                    },
+                    0xA1 => {
+                        if (!self.keys[key]) {
+                            self.pc += 2;
+                        }
+                    },
+                    else => return ExecutionError.InvalidInstruction,
+                }
+                next_time = times.CHECK_KEY;
             },
             0xF => {
                 std.log.debug("0xF handle timer and other stuff 0x{x:0>4}", .{instruction});
-                try self.doEf(x, nn, memory);
+                next_time = try self.doEf(x, nn, memory);
             },
             else => ExecutionError.InvalidInstruction,
         };
@@ -407,7 +527,7 @@ const Cpu = struct {
             return ExecutionError.OutOfMemory;
         }
 
-        return;
+        return next_time;
     }
 
     fn draw(self: *Cpu, mem: *[0x1000]u8, vx: u8, vy: u8, height: u4) !void {
