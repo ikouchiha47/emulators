@@ -1,5 +1,8 @@
 zig-cache/
 zig-out/
 
-tmp/
+tmp/*
 !tmp/.keep
+
+log/*
+!log/.keep

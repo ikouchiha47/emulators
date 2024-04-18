@@ -6,7 +6,7 @@ const fb = @import("display.zig");
 const SCREEN_WIDTH = 64;
 const SCREEN_HEIGHT = 32;
 
-pub const std_options = .{ .log_level = .info };
+pub const std_options = .{ .log_level = .debug };
 
 // https://en.wikipedia.org/wiki/CHIP-8
 // https://github.com/mattmikolay/chip-8/wiki/Mastering-CHIP‐8
@@ -133,6 +133,7 @@ const Cpu = struct {
 
         while (true) {
             if (self.cpu_state == CpuState.Running) {
+                std.log.debug("\n", .{});
                 self.execute(memory) catch break;
                 self.display.redraw(&self.screen) catch break;
 
@@ -157,10 +158,10 @@ const Cpu = struct {
         return;
     }
 
-    pub fn doEf(self: *Cpu, x: u4, nn: u8) !void {
+    pub fn doEf(self: *Cpu, x: u4, nn: u8, memory: *[0x1000]u8) !void {
         // validate x in range of self.v
         //
-        switch (nn) {
+        try switch (nn) {
             0x07 => {
                 self.v[x] = self.delay_timer;
             },
@@ -174,7 +175,7 @@ const Cpu = struct {
                 self.sound_timer = self.v[x];
             },
             0x1e => {
-                const result: u16 = @addWithOverflow(self.v[x], self.ir);
+                const result = @addWithOverflow(self.v[x], self.ir);
                 self.ir = result[0];
             },
             0x29 => {
@@ -184,27 +185,48 @@ const Cpu = struct {
                 self.ir = self.v[x] * 5;
             },
             0x33 => {
-                var number = self.v[x];
-                self.memory[self.ir] = number / 100;
+                const number = self.v[x];
 
-                number = number % 100;
-                self.memory[self.ir + 1] = number / 10;
-
-                number = number % 10;
-                self.memory[self.ir + 2] = number;
+                memory[self.ir] = number / 100;
+                memory[self.ir + 1] = (number % 100) / 10;
+                memory[self.ir + 2] = number % 10;
             },
             0x55 => {
                 var i: u4 = 0;
                 while (i <= x) : (i += 1) {
-                    self.memory[self.ir + i] = self.v[i];
+                    memory[self.ir + i] = self.v[i];
                 }
             },
             0x65 => {
                 var i: u4 = 0;
                 while (i <= x) : (i += 1) {
-                    self.v[i] = self.memory[self.ir + i];
+                    self.v[i] = memory[self.ir + i];
                 }
             },
+            else => ExecutionError.InvalidInstruction,
+        };
+
+        return;
+    }
+
+    fn checkBitAndShift(self: *Cpu, xreg: u8, msb: bool) void {
+        var bit: u8 = undefined;
+        if (msb) {
+            bit = 0x80;
+        } else {
+            bit = 0x1;
+        }
+
+        if (self.v[xreg] & bit == bit) {
+            self.v[0xf] = 1;
+        } else {
+            self.v[0xf] = 0;
+        }
+
+        if (msb) {
+            self.v[xreg] = self.v[xreg] << 1;
+        } else {
+            self.v[xreg] = self.v[xreg] >> 1;
         }
     }
 
@@ -228,9 +250,7 @@ const Cpu = struct {
             },
             6 => {
                 // get least significant bit
-                const lsb: u8 = self.v[x] & 0x01;
-                self.v[0xf] = lsb;
-                self.v[x] = self.v[x] >> 1;
+                self.checkBitAndShift(x, false);
             },
             7 => {
                 self.v[0xf] = if (self.v[y] >= self.v[x]) 1 else 0;
@@ -240,9 +260,7 @@ const Cpu = struct {
             },
             0xe => {
                 // most sb
-                const msb: u8 = self.v[x] & 0x80;
-                self.v[0xf] = msb;
-                self.v[x] = self.v[x] << 1;
+                self.checkBitAndShift(x, true);
             },
             else => ExecutionError.UnknownInstruction,
         };
@@ -259,16 +277,17 @@ const Cpu = struct {
         const lo: u8 = memory[self.pc];
         const hi: u8 = memory[self.pc + 1];
 
-        // const prev_pc = self.pc;
+        const prev_pc = self.pc;
         // _ = prev_pc;
 
-        std.log.debug("\npc: 0x{x:0>4}, pc+1: 0x{x:0>4}", .{ self.pc, self.pc + 1 });
+        // std.log.debug("\npc: 0x{x:0>4}, pc+1: 0x{x:0>4}", .{ self.pc, self.pc + 1 });
         self.pc += 2;
 
         var instruction: u16 = 0;
         instruction = ((instruction | lo) << 8) | hi;
 
-        std.log.debug("read inst: 0x{x} lo: 0x{x:0>2} hi: 0x{x:0>2} pc: 0x{x:0>4}", .{ instruction, lo, hi, self.pc });
+        // std.log.debug("read inst: 0x{x} lo: 0x{x:0>2} hi: 0x{x:0>2} pc: 0x{x:0>4}", .{ instruction, lo, hi, self.pc });
+        std.log.debug("read inst: 0x{x} prev_pc: 0x{x:0>4} pc: 0x{x:0>4}", .{ instruction, prev_pc, self.pc });
 
         const address: u16 = instruction & 0x0FFF;
         const nn: u8 = @intCast(instruction & 0x00FF);
@@ -283,6 +302,7 @@ const Cpu = struct {
 
         // std.log.debug("memory {any}", .{memory});
         // std.log.debug("value at address 0x{x:0>4} 0x{x:0>4}", .{ address, memory[address] });
+        std.log.debug("processed values nnn: 0x{x:0>4}, nn: 0x{x:0>4}, n: 0x{x:0>4} x: 0x{x:0>2} y: 0x{x:0>2}", .{ address, nn, n, x, y });
 
         try switch ((instruction & 0xF000) >> 12) {
             0x0 => {
@@ -355,7 +375,8 @@ const Cpu = struct {
             },
             0xB => {
                 std.log.debug("0xBNNN jump to NNN", .{});
-                self.pc = address + self.v[0];
+                const v0: u16 = self.v[0];
+                self.pc = address + v0;
             },
             0xC => {
                 std.log.debug("0xCXNN set vx to rand() & nn", .{});
@@ -367,15 +388,15 @@ const Cpu = struct {
                 std.log.debug("0xDXYN display N height at XY", .{});
                 const vx = self.v[x] & 63; // clamp the value to screen width
                 const vy = self.v[y] & 31; // clamp the value to screen height
-                const height = n;
 
-                try self.draw(memory, vx, vy, height);
+                try self.draw(memory, vx, vy, n);
             },
             0xE => {
                 std.log.debug("0xE handle keyboard event. 0x{x:0>4}", .{instruction});
             },
             0xF => {
                 std.log.debug("0xF handle timer and other stuff 0x{x:0>4}", .{instruction});
+                try self.doEf(x, nn, memory);
             },
             else => ExecutionError.InvalidInstruction,
         };
@@ -472,7 +493,7 @@ pub fn readFile(filename: []const u8, allocator: std.mem.Allocator) ![]u8 {
 
 pub fn main() !void {
     // std.log.debug("Hello, world!\n", .{});
-    const filename = "./c8games/INVADERS";
+    const filename = "./c8games/INVADERS2";
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
