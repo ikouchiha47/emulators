@@ -110,7 +110,7 @@ pub const Display = struct {
     pub fn getEvent(self: *Display) Event {
         _ = self;
 
-        if (SDL.pollEvent()) |ev| {
+        while (SDL.pollEvent()) |ev| {
             switch (ev) {
                 .quit => return Event.quitEvent(),
                 .key_down, .key_up => |key| {

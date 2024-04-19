@@ -6,6 +6,7 @@ const fb = @import("display.zig");
 
 const SCREEN_WIDTH = 64;
 const SCREEN_HEIGHT = 32;
+const TIME_MULT = 1000;
 
 pub const std_options = .{ .log_level = .info };
 
@@ -133,10 +134,10 @@ const Cpu = struct {
                 std.log.debug("running", .{});
 
                 const next_time = self.execute() catch 160;
-                std.time.sleep(next_time * 1000);
+                std.time.sleep(next_time * TIME_MULT);
             } else {
                 // std.log.info("waiting for cpu input", .{});
-                std.time.sleep(16 * 1000 * 1000);
+                std.time.sleep(16 * 1000 * TIME_MULT);
             }
 
             self.display.redraw(&self.screen) catch break;
@@ -156,6 +157,8 @@ const Cpu = struct {
                     },
                 }
             }
+
+            // std.log.info("event processed", .{});
         }
 
         std.log.debug("register state {any}", .{self.v});
@@ -209,12 +212,13 @@ const Cpu = struct {
         const now = std.time.milliTimestamp();
         const diff: f32 = @floatFromInt(now - self.timestamp);
 
-        // const clock_rate: f32 = ((1 / 5) * 1000 + 0.5);
-        const clock_rate: f32 = 16.7;
+        const clock_rate: f32 = ((1 / 60) * 1000 + 0.2);
+        // const clock_rate: f32 = 16.7;
 
         if (diff >= clock_rate and self.delay_timer > 0) {
-            std.log.info("substracting", .{});
             self.delay_timer -= 1;
+            std.log.info("substracting {d}", .{self.delay_timer});
+
             return true;
         }
 
@@ -252,6 +256,7 @@ const Cpu = struct {
             0x1e => {
                 const result = @addWithOverflow(self.v[x], self.ir);
                 self.ir = result[0];
+                self.v[0xf] = if (self.ir > 0x0f00) 1 else 0;
                 return times.ADD_TO_INDEX;
             },
             0x29 => {
