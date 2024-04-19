@@ -80,7 +80,7 @@ const Cpu = struct {
     ir: u16,
     pc: u16,
 
-    stack: [16]u16,
+    stack: [64]u16,
     sp: u8,
 
     delay_timer: u8,
@@ -107,7 +107,7 @@ const Cpu = struct {
             .v = std.mem.zeroes([16]u8),
             .ir = 0,
             .sp = 0,
-            .stack = std.mem.zeroes([16]u16),
+            .stack = std.mem.zeroes([64]u16),
             .display = display,
             .screen = std.mem.zeroes([SCREEN_HEIGHT][SCREEN_WIDTH]u8),
             .delay_timer = 0,
@@ -116,7 +116,7 @@ const Cpu = struct {
             .cpu_state = CpuState.Running,
             .rnd = std.rand.DefaultPrng.init(0),
             .key_pressed_index = 0,
-            .timestamp = 0,
+            .timestamp = std.time.milliTimestamp(),
             .ram = undefined,
         };
     }
@@ -133,13 +133,13 @@ const Cpu = struct {
                 std.log.debug("running", .{});
 
                 const next_time = self.execute() catch 160;
-                self.display.redraw(&self.screen) catch break;
-
                 std.time.sleep(next_time * 1000);
             } else {
-                std.log.info("waiting for cpu input", .{});
+                // std.log.info("waiting for cpu input", .{});
                 std.time.sleep(16 * 1000 * 1000);
             }
+
+            self.display.redraw(&self.screen) catch break;
 
             _ = self.nextTick();
 
@@ -162,8 +162,8 @@ const Cpu = struct {
         return;
     }
 
-    fn getMappedKey(key: SDL.Scancode) ?u32 {
-        var chip8Key: ?u32 = undefined;
+    fn getMappedKey(key: SDL.Scancode) ?u16 {
+        var chip8Key: ?u16 = undefined;
 
         switch (key) {
             .@"1" => chip8Key = 0x1,
@@ -206,15 +206,14 @@ const Cpu = struct {
     }
 
     fn nextTick(self: *Cpu) bool {
-        if (self.timestamp == 0) {
-            self.timestamp = std.time.milliTimestamp();
-            return false;
-        }
-
         const now = std.time.milliTimestamp();
-        const diff = now - self.timestamp;
+        const diff: f32 = @floatFromInt(now - self.timestamp);
 
-        if (diff > 16 and self.delay_timer > 0) {
+        // const clock_rate: f32 = ((1 / 5) * 1000 + 0.5);
+        const clock_rate: f32 = 16.7;
+
+        if (diff >= clock_rate and self.delay_timer > 0) {
+            std.log.info("substracting", .{});
             self.delay_timer -= 1;
             return true;
         }
@@ -222,13 +221,15 @@ const Cpu = struct {
         return false;
     }
 
-    pub fn doEf(self: *Cpu, x: u4, nn: u8) !u32 {
+    pub fn doEf(self: *Cpu, x: u8, nn: u8) !u32 {
         const memory = &self.ram.memory;
         // validate x in range of self.v
 
         try switch (nn) {
             0x07 => {
                 self.v[x] = self.delay_timer;
+
+                std.log.info("setting delay timer {any}", .{self.delay_timer});
                 return times.GET_DELAY_TIMER;
             },
             0x0a => {
@@ -241,6 +242,7 @@ const Cpu = struct {
             },
             0x15 => {
                 self.delay_timer = self.v[x];
+                std.log.info("getting delay timer {any}", .{self.delay_timer});
                 return times.GET_DELAY_TIMER;
             },
             0x18 => {
@@ -311,7 +313,7 @@ const Cpu = struct {
         }
     }
 
-    pub fn doMath(self: *Cpu, op: u4, x: u4, y: u4) !void {
+    pub fn doMath(self: *Cpu, op: u8, x: u8, y: u8) !void {
         try switch (op) {
             0 => self.v[x] = self.v[y],
             1 => self.v[x] |= self.v[y],
@@ -375,14 +377,14 @@ const Cpu = struct {
 
         const address: u16 = instruction & 0x0FFF;
         const nn: u8 = @intCast(instruction & 0x00FF);
-        const n: u4 = @intCast(instruction & 0x000F);
+        const n: u8 = @intCast(instruction & 0x000F);
 
         // std.log.debug("address 0x{x}", .{address});
         // last 4 bits of starting byte
-        const x: u4 = @intCast((instruction & 0x0F00) >> 8);
+        const x: u8 = @intCast((instruction & 0x0F00) >> 8);
 
         // first 4 bits of the ending byte
-        const y: u4 = @intCast((instruction & 0x00F0) >> 4);
+        const y: u8 = @intCast((instruction & 0x00F0) >> 4);
 
         // std.log.debug("memory {any}", .{memory});
         // std.log.debug("value at address 0x{x:0>4} 0x{x:0>4}", .{ address, memory[address] });
@@ -536,7 +538,7 @@ const Cpu = struct {
         return next_time;
     }
 
-    fn draw(self: *Cpu, vx: u8, vy: u8, height: u4) !void {
+    fn draw(self: *Cpu, vx: u8, vy: u8, height: u8) !void {
         const mem = &self.ram.memory;
 
         self.v[0xf] = 0;
