@@ -129,36 +129,66 @@ const Cpu = struct {
         defer self.display.destroy();
         self.ram = ram;
 
-        var next_time: u64 = 1600; // 1600 microseconds
+        var render_tick: usize = 0;
+        var timer_tick: usize = SDL.getTicks();
 
         while (true) {
-            if (self.cpu_state == CpuState.Running) {
-                std.log.debug("running", .{});
-
-                next_time = self.execute() catch 160;
+            if (SDL.getTicks() - timer_tick >= 16) {
+                self.handleTimers();
+                timer_tick = SDL.getTicks();
             }
 
-            std.time.sleep(next_time * TIME_MULT); // into nanoseconds
-            self.display.redraw(&self.screen) catch break;
+            const ev = self.display.getEvent();
+            switch (ev.kind) {
+                .None => {},
+                .Quit => return,
+                .KeyUp => {
+                    try self.updateKey(ev.data, false);
+                },
+                .KeyDown => {
+                    try self.updateKey(ev.data, true);
+                },
+            }
+            _ = self.execute() catch return;
 
-            std.log.debug("cpu state {any}", .{self.cpu_state});
+            SDL.delay(1);
 
-            _ = self.nextTick();
-
-            while (true) {
-                const ev = self.display.getEvent();
-                switch (ev.kind) {
-                    .None => break,
-                    .Quit => return,
-                    .KeyUp => {
-                        try self.updateKey(ev.data, false);
-                    },
-                    .KeyDown => {
-                        try self.updateKey(ev.data, true);
-                    },
-                }
+            if (SDL.getTicks() - render_tick >= 16) {
+                self.display.redraw(&self.screen) catch return;
+                render_tick = SDL.getTicks();
             }
         }
+
+        // var next_time: u64 = 1600; // 1600 microseconds
+        //
+        // while (true) {
+        //     if (self.cpu_state == CpuState.Running) {
+        //         std.log.debug("running", .{});
+        //
+        //         next_time = self.execute() catch 160;
+        //     }
+        //
+        //     std.time.sleep(next_time * TIME_MULT); // into nanoseconds
+        //     self.display.redraw(&self.screen) catch break;
+        //
+        //     std.log.debug("cpu state {any}", .{self.cpu_state});
+        //
+        //     _ = self.nextTick();
+        //
+        //     while (true) {
+        //         const ev = self.display.getEvent();
+        //         switch (ev.kind) {
+        //             .None => break,
+        //             .Quit => return,
+        //             .KeyUp => {
+        //                 try self.updateKey(ev.data, false);
+        //             },
+        //             .KeyDown => {
+        //                 try self.updateKey(ev.data, true);
+        //             },
+        //         }
+        //     }
+        // }
 
         std.log.debug("register state {any}", .{self.v});
         return;
@@ -197,13 +227,23 @@ const Cpu = struct {
             if (value > 0xf) {
                 return; //ExecutionError.UnregisteredKey;
             }
-            if (self.cpu_state == CpuState.IOWaiting and self.keys[value] != pressed) {
+            if (self.cpu_state == CpuState.IOWaiting and !pressed) { // and self.keys[value] != pressed
                 self.cpu_state = CpuState.Running;
                 self.v[self.key_pressed_index] = @intCast(value);
             }
 
             std.log.debug("key pressed {any} {any} {any} {any}", .{ key, pressed, value, self.keys[value] });
             self.keys[value] = pressed;
+        }
+    }
+
+    fn handleTimers(self: *Cpu) void {
+        if (self.delay_timer > 0) {
+            self.delay_timer -= 1;
+        }
+
+        if (self.sound_timer > 0) {
+            self.sound_timer -= 1;
         }
     }
 
@@ -266,7 +306,7 @@ const Cpu = struct {
                 // for n its n * 5
                 self.ir = self.v[x] * 5;
 
-                std.log.debug("FX29 rendering sprite {d} 0x{x:0>4} ir: 0x{x:0>4}", .{self.v[x], self.v[x], self.ir });
+                std.log.debug("FX29 rendering sprite {d} 0x{x:0>4} ir: 0x{x:0>4}", .{ self.v[x], self.v[x], self.ir });
 
                 return times.SET_FONT;
             },
