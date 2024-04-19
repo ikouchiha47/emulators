@@ -1,3 +1,5 @@
+// https://jackson-s.me/2019/07/13/Chip-8-Instruction-Scheduling-and-Frequency.html
+// values in microseconds
 pub const CLEAR_SCREEN = 109;
 pub const RETURN = 105;
 pub const JUMP = 105;

@@ -129,18 +129,19 @@ const Cpu = struct {
         defer self.display.destroy();
         self.ram = ram;
 
+        var next_time: u64 = 1600; // 1600 microseconds
+
         while (true) {
             if (self.cpu_state == CpuState.Running) {
                 std.log.debug("running", .{});
 
-                const next_time = self.execute() catch 160;
-                std.time.sleep(next_time * TIME_MULT);
-            } else {
-                // std.log.info("waiting for cpu input", .{});
-                std.time.sleep(16 * 1000 * TIME_MULT);
+                next_time = self.execute() catch 160;
             }
 
+            std.time.sleep(next_time * TIME_MULT); // into nanoseconds
             self.display.redraw(&self.screen) catch break;
+
+            std.log.debug("cpu state {any}", .{self.cpu_state});
 
             _ = self.nextTick();
 
@@ -157,8 +158,6 @@ const Cpu = struct {
                     },
                 }
             }
-
-            // std.log.info("event processed", .{});
         }
 
         std.log.debug("register state {any}", .{self.v});
@@ -203,7 +202,7 @@ const Cpu = struct {
                 self.v[self.key_pressed_index] = @intCast(value);
             }
 
-            std.log.info("key pressed {any} {any} {any} {any}", .{ key, pressed, value, self.keys[value] });
+            std.log.debug("key pressed {any} {any} {any} {any}", .{ key, pressed, value, self.keys[value] });
             self.keys[value] = pressed;
         }
     }
@@ -212,13 +211,11 @@ const Cpu = struct {
         const now = std.time.milliTimestamp();
         const diff: f32 = @floatFromInt(now - self.timestamp);
 
-        const clock_rate: f32 = ((1 / 60) * 1000 + 0.2);
-        // const clock_rate: f32 = 16.7;
+        // const clock_rate: f32 = ((1 / 60) * 1000 + 0.2);
+        const clock_rate: f32 = 16.67;
 
         if (diff >= clock_rate and self.delay_timer > 0) {
             self.delay_timer -= 1;
-            std.log.info("substracting {d}", .{self.delay_timer});
-
             return true;
         }
 
@@ -233,20 +230,21 @@ const Cpu = struct {
             0x07 => {
                 self.v[x] = self.delay_timer;
 
-                std.log.info("setting delay timer {any}", .{self.delay_timer});
+                std.log.debug("FX07 setting delay timer {any}", .{self.delay_timer});
                 return times.GET_DELAY_TIMER;
             },
             0x0a => {
                 // we store the register x,
                 // on key_pressed_index,
                 // we set the value of V(x)
+                std.log.debug("FX0a waiting for input", .{});
                 self.key_pressed_index = x;
                 self.cpu_state = CpuState.IOWaiting;
                 return times.GET_KEY;
             },
             0x15 => {
                 self.delay_timer = self.v[x];
-                std.log.info("getting delay timer {any}", .{self.delay_timer});
+                std.log.debug("FX15 getting delay timer {any}", .{self.delay_timer});
                 return times.GET_DELAY_TIMER;
             },
             0x18 => {
@@ -256,6 +254,9 @@ const Cpu = struct {
             0x1e => {
                 const result = @addWithOverflow(self.v[x], self.ir);
                 self.ir = result[0];
+
+                std.log.debug("FX1e adding with overflow 0x{x:0>4}", .{result[0]});
+
                 self.v[0xf] = if (self.ir > 0x0f00) 1 else 0;
                 return times.ADD_TO_INDEX;
             },
@@ -264,6 +265,9 @@ const Cpu = struct {
                 // since each value is 5 byte
                 // for n its n * 5
                 self.ir = self.v[x] * 5;
+
+                std.log.debug("FX29 rendering sprite {d} 0x{x:0>4} ir: 0x{x:0>4}", .{self.v[x], self.v[x], self.ir });
+
                 return times.SET_FONT;
             },
             0x33 => {
@@ -273,6 +277,7 @@ const Cpu = struct {
                 memory[self.ir + 1] = (number % 100) / 10;
                 memory[self.ir + 2] = number % 10;
 
+                std.log.debug("FX33 saving number {d}", .{number});
                 return times.BCD;
             },
             0x55 => {
@@ -281,6 +286,7 @@ const Cpu = struct {
                     memory[self.ir + i] = self.v[i];
                 }
 
+                std.log.debug("FX55", .{});
                 return times.STORE_MEM;
             },
             0x65 => {
@@ -288,6 +294,8 @@ const Cpu = struct {
                 while (i <= x) : (i += 1) {
                     self.v[i] = memory[self.ir + i];
                 }
+
+                std.log.debug("FX65", .{});
 
                 return times.LOAD_MEM;
             },

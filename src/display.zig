@@ -79,13 +79,9 @@ pub const Display = struct {
     ) !void {
         // std.log.info("display screen data {any}", .{screen});
 
-        try self.renderer.setColorRGB(
-            0,
-            0,
-            0,
-        );
+        try self.renderer.setColorRGB(15, 24, 38);
         try self.renderer.clear();
-        try self.renderer.setColorRGB(255, 255, 255);
+        try self.renderer.setColorRGB(116, 166, 255);
 
         for (screen, 0..) |line, y| {
             for (line, 0..) |pixel, x| {
