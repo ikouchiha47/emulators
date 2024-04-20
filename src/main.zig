@@ -8,7 +8,7 @@ const SCREEN_WIDTH = 64;
 const SCREEN_HEIGHT = 32;
 const TIME_MULT = 1000;
 
-pub const std_options = .{ .log_level = .debug };
+pub const std_options = .{ .log_level = .info };
 
 // Chip-8 was capable of accessing 4KB of RAM (4096 Bytes)
 // Location (0x000) to (0xFFF) (0 to 4095)
@@ -277,15 +277,13 @@ const Cpu = struct {
                 const result = @addWithOverflow(self.v[x], self.ir);
 
                 self.ir = result[0];
-                self.v[0xf] = if (self.ir > 0x0f00) 1 else 0;
-
                 return times.ADD_TO_INDEX;
             },
             0x29 => { //FX29
                 // for rendeirng value (self.v[x]=) 3
                 // since each value is 5 byte
                 // for n its n * 5
-                self.ir = self.v[x] * 5;
+                self.ir = (self.v[x] & 0xf) * 5;
 
                 return times.SET_FONT;
             },
@@ -351,15 +349,15 @@ const Cpu = struct {
             3 => self.v[x] ^= self.v[y],
             4 => { //8XY4
                 const res = @addWithOverflow(self.v[x], self.v[y]);
-
                 self.v[x] = res[0];
+
                 self.v[0xf] = if (res[1] > 0) 1 else 0;
             },
             5 => { //8XY5
                 const res = @subWithOverflow(self.v[x], self.v[y]);
-                self.v[0xf] = if (self.v[x] >= self.v[y]) 1 else 0;
-
                 self.v[x] = res[0];
+
+                self.v[0xf] = if (self.v[x] >= self.v[y]) 1 else 0;
             },
             6 => { //8XY6
                 // get least significant bit
@@ -367,9 +365,9 @@ const Cpu = struct {
             },
             7 => { //8XY7
                 const res = @subWithOverflow(self.v[y], self.v[x]);
+                self.v[x] = res[0];
 
                 self.v[0xf] = if (self.v[y] >= self.v[x]) 1 else 0;
-                self.v[x] = res[0];
             },
             0xe => { //8XYE
                 // most sb
@@ -442,12 +440,12 @@ const Cpu = struct {
 
         try switch ((instruction & 0xF000) >> 12) {
             0x0 => {
-                switch (nn) {
-                    0xe0 => {
+                switch (address) {
+                    0x00e0 => {
                         self.display.clearScreen(&self.screen);
                         next_time = times.CLEAR_SCREEN;
                     },
-                    0xee => {
+                    0x00ee => {
                         self.sp -= 1;
                         self.pc = self.stack[self.sp];
                         next_time = times.RETURN;
@@ -455,11 +453,10 @@ const Cpu = struct {
                     else => return ExecutionError.InvalidInstruction,
                 }
             },
-            0x1 => {
-                // std.log.debug("jump 0x{x:0>2}", .{address});
-                if (address > 0x1000) {
-                    return ExecutionError.OutOfMemory;
-                }
+            0x1 => { //2NNN
+                // if (address > 0x1000) {
+                //     return ExecutionError.OutOfMemory;
+                // }
                 self.pc = address;
                 next_time = times.JUMP;
             },
@@ -489,8 +486,7 @@ const Cpu = struct {
             },
             0x5 => {
                 // std.log.debug("0x5XY0 increment pc if v[x] == v[y]", .{});
-
-                if (self.v[x] == self.v[y]) {
+                if (n == 0 and self.v[x] == self.v[y]) {
                     self.pc += 2;
                 }
 
@@ -519,7 +515,7 @@ const Cpu = struct {
             0x9 => {
                 // std.log.debug("cond 0x9 skip to NN", .{});
 
-                if (self.v[x] != self.v[y]) {
+                if (n == 0 and self.v[x] != self.v[y]) {
                     self.pc += 2;
                 }
 
@@ -556,7 +552,8 @@ const Cpu = struct {
             },
             0xE => {
                 // std.log.debug("0xE handle keyboard event. 0x{x:0>4}", .{instruction});
-                const key = self.v[x];
+                const key = self.v[x] & 0xf;
+
                 switch (nn) {
                     0x9E => {
                         if (self.keys[key]) {

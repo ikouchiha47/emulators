@@ -1,2 +1,2 @@
 run:
-	zig build run 2> logs/debug.log
+	zig build run 2> log/debug.log
