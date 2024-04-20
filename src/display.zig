@@ -57,8 +57,8 @@ pub const Display = struct {
             "chipate",
             .{ .centered = {} },
             .{ .centered = {} },
-            640,
-            320,
+            2 * 640,
+            2 * 320,
             .{ .vis = .shown },
         );
 
