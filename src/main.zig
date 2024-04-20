@@ -148,7 +148,9 @@ const Cpu = struct {
                 },
             }
 
-            _ = self.execute() catch return;
+            if (self.cpu_state == CpuState.Running) {
+                _ = self.execute() catch return;
+            }
 
             SDL.delay(1);
 
@@ -422,6 +424,7 @@ const Cpu = struct {
             \\registers: {any}
             \\vy: 0x{x:0>4} vx: 0x{x:0>4}
         ;
+
         std.log.debug(debug_log, .{
             instruction,
             prev_pc,
