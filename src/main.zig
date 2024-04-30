@@ -14,7 +14,7 @@ pub const std_options = .{ .log_level = .info };
 // Location (0x000) to (0xFFF) (0 to 4095)
 const Memory = struct {
     // 4KB Memory
-    memory: [0x1000]u8,
+    memory: [0x0fff]u8,
 
     // CHIP-8 allows memory addressing 2^12,
     // so, 16 bits to cover all the address ranges
